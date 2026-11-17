@@ -1,0 +1,15 @@
+{
+  "name": "ragscope-static",
+  "private": true,
+  "type": "module",
+  "description": "Static, in-browser version of RAGScope",
+  "scripts": {
+    "build": "node build.mjs",
+    "record": "node build.mjs --record",
+    "serve": "npx --yes http-server@14.1.1 public -p 8080 -c-1"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "4.3.1",
+    "@mlc-ai/web-llm": "0.2.86"
+  }
+}

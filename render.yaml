@@ -1,0 +1,27 @@
+# Render Blueprint: deploys the in-browser version (site/public) as a free static site.
+# In Render: New → Blueprint → pick this repo.
+services:
+  - type: web
+    runtime: static
+    name: ragscope
+    rootDir: site
+    buildCommand: npm ci && node build.mjs --vendor-only
+    staticPublishPath: public
+    headers:
+      # Only this site's own scripts may run. The page may only connect to itself and the
+      # model hosts (Hugging Face for weights, GitHub raw for WebLLM's compiled model code).
+      - path: /*
+        name: Content-Security-Policy
+        value: "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' https://huggingface.co https://*.huggingface.co https://*.hf.co https://raw.githubusercontent.com; worker-src 'self' blob:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: no-referrer
+      - path: /*
+        name: Permissions-Policy
+        value: "camera=(), microphone=(), geolocation=(), interest-cohort=()"
+      - path: /vendor/*
+        name: Cache-Control
+        value: "public, max-age=604800"

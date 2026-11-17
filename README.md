@@ -50,6 +50,25 @@ Open http://localhost:8000. The first start downloads the embedding model (about
 
 With `LLM_PROVIDER=auto` (the default), the app uses Claude when a key is set and Ollama otherwise.
 
+## Free public website (runs in the visitor's browser)
+
+[site/](site/) is a static version that needs no server and no API key. It's free to host on Render.
+
+- Before downloading anything, it asks the visitor's permission. The consent screen explains the download size (about 1.8 GB), where the files come from, that questions never leave the device, and how to delete the files afterwards.
+- **If the visitor agrees:** the search model ([transformers.js](https://huggingface.co/docs/transformers.js)) and the language model, Llama 3.2 3B through [WebLLM](https://webllm.mlc.ai), run on the visitor's own graphics chip using WebGPU.
+- **If the visitor declines:** a demo replays all four steps from data recorded earlier with the same models, and nothing is downloaded.
+- **Security:** the site serves its own copies of the JavaScript libraries (no third-party script CDNs), and [render.yaml](render.yaml) sets a strict Content-Security-Policy.
+
+```bash
+cd site
+npm install
+npm run build     # embeds the knowledge base and copies the browser libraries
+npm run serve     # http://localhost:8080
+npm run record    # optional: re-record the demo answers (needs Ollama with llama3.2:3b)
+```
+
+To deploy on Render, choose **New → Blueprint** and pick this repo. Render reads [render.yaml](render.yaml). If you edit `knowledge/`, rerun `npm run build` and commit the files in `site/public/data/`.
+
 ## Tests
 
 ```bash

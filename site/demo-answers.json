@@ -1,0 +1,32 @@
+{
+  "What is a token?": {
+    "answer": "A token is a small piece of text that a language model uses to process and understand input. According to [1], a token can be a word, part of a word, or even a punctuation mark. For example, the word \"unbelievable\" might be split into three tokens: \"un\", \"believ\", and \"able\". This is a rough rule of thumb, but it gives you an idea of what a token is. [1]",
+    "model": "Llama 3.2 3B",
+    "input_tokens": 433,
+    "output_tokens": 94
+  },
+  "How does attention work in a transformer?": {
+    "answer": "In a transformer, attention is a key component that allows tokens to share information with each other [1]. The attention mechanism is a multi-head attention operation, which means that different heads specialize in different tasks, such as tracking grammar or linking pronouns to nouns [1]. This allows the model to capture different types of relationships between tokens.\n\nThe attention mechanism works by comparing the importance of each token to every other token in the sequence [2]. This is done using a weighted sum, where the weights are learned during training [2]. The model then uses these weights to compute a weighted sum of the values of the other tokens, which is used to compute the attention score for each token [2].\n\nIn other words, attention allows the model to focus on the most relevant tokens in the sequence, and to weigh their importance relative to each other [2]. This is a key innovation of the transformer architecture, and it allows the model to capture complex relationships between tokens in parallel, rather than sequentially [2].",
+    "model": "Llama 3.2 3B",
+    "input_tokens": 357,
+    "output_tokens": 201
+  },
+  "Why do AI models hallucinate?": {
+    "answer": "AI models hallucinate because they are trained to produce likely-sounding text, and a plausible-sounding falsehood can look just as likely as the truth [1]. This happens when the model is trying to fill in gaps in its knowledge or generate text that sounds coherent, but it ends up producing something that is not based on actual facts.\n\nIn other words, the model is trying to make educated guesses about what might be true, but it's not always able to distinguish between fact and fiction. This can lead to the model producing false or misleading information, which is known as a hallucination.",
+    "model": "Llama 3.2 3B",
+    "input_tokens": 440,
+    "output_tokens": 119
+  },
+  "What does temperature do?": {
+    "answer": "Temperature in a language model controls how adventurous the model is when choosing the next token. A low temperature makes the model almost always pick the most likely token, resulting in focused and repeatable answers [1]. On the other hand, a high temperature flattens the probabilities, allowing less likely tokens to be picked more often, which can lead to more varied and creative but less reliable text [1]. Lower sampling temperature can also make answers more conservative [2]. In essence, temperature affects the level of uncertainty in the model's responses, with lower temperatures resulting in more predictable and higher temperatures resulting in more unpredictable and creative responses.",
+    "model": "Llama 3.2 3B",
+    "input_tokens": 492,
+    "output_tokens": 125
+  },
+  "How is a model trained?": {
+    "answer": "A model is trained through a process called pretraining, which involves repeatedly trying to predict the next token in a sequence of text [2]. This is done by reading a huge amount of text and adjusting the model's weights based on how wrong it was in its predictions. The goal is to make the right answer more likely next time.\n\nDuring pretraining, the model starts with random weights and makes predictions one by one, with a loss function measuring how wrong it was each time [2]. This process is repeated trillions of times, allowing the model to become very good at predicting text and picking up grammar, facts, and patterns of reasoning.\n\nHowever, it's worth noting that the model's training data comes from human-written text, which can contain biases [3]. This means that the model may learn and repeat stereotypes or present one viewpoint as the only one, unless developers take steps to test for and reduce bias.",
+    "model": "Llama 3.2 3B",
+    "input_tokens": 430,
+    "output_tokens": 185
+  }
+}

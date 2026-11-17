@@ -1,0 +1,41 @@
+/* Additions for the static, in-browser version. Base styles come from style.css. */
+
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+a { color: var(--accent); }
+
+dialog {
+  width: min(880px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto;
+  border: 1px solid var(--line); border-radius: var(--radius); padding: 24px;
+  background: var(--surface); color: var(--ink);
+}
+dialog::backdrop { background: rgb(0 0 0 / 0.55); }
+dialog h2 { margin: 0 0 6px; font-size: 22px; }
+.choices { display: grid; grid-template-columns: 3fr 2fr; gap: 16px; margin-top: 16px; }
+@media (max-width: 700px) { .choices { grid-template-columns: 1fr; } }
+.choice { border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.choice h3 { margin: 0; font-size: 17px; }
+.choice.unavailable { opacity: 0.6; }
+.facts { margin: 0; padding-left: 18px; font-size: 14px; display: grid; gap: 6px; }
+.confirm { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; font-weight: 600; }
+.confirm input { margin-top: 3px; width: 16px; height: 16px; flex: none; }
+.choice button {
+  font: inherit; font-weight: 600; padding: 10px 16px; border-radius: 10px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--bg); color: var(--ink); margin-top: auto;
+}
+.choice button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.choice button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.modebar {
+  display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-top: 20px;
+  padding: 10px 14px; border-radius: 10px; background: var(--accent-soft); font-size: 14px;
+}
+.modebar-actions { display: flex; gap: 14px; }
+.link { font: inherit; background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; text-decoration: underline; }
+
+.loading { margin-top: 12px; font-size: 14px; color: var(--muted); }
+.loading .bar { height: 8px; margin-top: 6px; }
+
+.ask input:disabled { opacity: 0.7; }
+.ask button:disabled { cursor: not-allowed; }
+.demo-note { font-size: 14px; padding: 8px 12px; border-radius: 8px; background: var(--accent-soft); margin: 0 0 12px; }
