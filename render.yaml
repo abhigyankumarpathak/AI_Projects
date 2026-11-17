@@ -9,10 +9,11 @@ services:
     staticPublishPath: public
     headers:
       # Only this site's own scripts may run. The page may only connect to itself and the
-      # model hosts (Hugging Face for weights, GitHub raw for WebLLM's compiled model code).
+      # model hosts (Hugging Face for weights, GitHub raw for WebLLM's compiled model code), plus
+      # the visitor's own Ollama app on localhost, which the page only contacts after a click.
       - path: /*
         name: Content-Security-Policy
-        value: "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' https://huggingface.co https://*.huggingface.co https://*.hf.co https://raw.githubusercontent.com; worker-src 'self' blob:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+        value: "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' http://localhost:11434 http://127.0.0.1:11434 https://huggingface.co https://*.huggingface.co https://*.hf.co https://raw.githubusercontent.com; worker-src 'self' blob:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
       - path: /*
         name: X-Content-Type-Options
         value: nosniff

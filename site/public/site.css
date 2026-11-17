@@ -39,3 +39,23 @@ dialog h2 { margin: 0 0 6px; font-size: 22px; }
 .ask input:disabled { opacity: 0.7; }
 .ask button:disabled { cursor: not-allowed; }
 .demo-note { font-size: 14px; padding: 8px 12px; border-radius: 8px; background: var(--accent-soft); margin: 0 0 12px; }
+
+.found { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-top: 16px; }
+.found h3 { margin: 0 0 4px; font-size: 16px; }
+.found-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; }
+.found-list:empty { display: none; }
+.found-item {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px;
+  padding: 10px 12px; border-radius: 10px; background: var(--accent-soft);
+}
+.found-item b { display: block; }
+.found-item .small { color: var(--muted); }
+.found-item button, .ollama-box button {
+  font: inherit; font-weight: 600; padding: 8px 14px; border-radius: 10px; cursor: pointer;
+  border: 1px solid var(--accent); background: var(--accent); color: #fff;
+}
+.ollama-box { margin-top: 10px; }
+.ollama-box summary { cursor: pointer; color: var(--accent); font-size: 14px; font-weight: 600; }
+.ollama-box pre { white-space: pre-wrap; word-break: break-all; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 12px; }
+.ollama-box select { font: inherit; padding: 6px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+#ollama-status { margin-top: 8px; display: grid; gap: 8px; }

@@ -15,6 +15,19 @@
     <h2 id="consent-title">How would you like to explore?</h2>
     <p class="muted">RAGScope can run a real AI model <b>inside your browser</b>, or show you a recorded demo. Nothing is downloaded until you choose.</p>
 
+    <!-- AI that's already on this device: checked silently, except Ollama, which waits for a click. -->
+    <section class="found" aria-labelledby="found-title">
+      <h3 id="found-title">Already on this device</h3>
+      <p class="muted small" id="found-status">Looking for AI models you already have…</p>
+      <ul class="found-list" id="found-list"></ul>
+      <details class="ollama-box" id="ollama-box">
+        <summary>Have Ollama installed? Use it instead of downloading</summary>
+        <p class="small">This lets the page send questions to the Ollama app on <i>your own computer</i>. Your browser may ask whether to allow this site to reach devices on your network. The page only checks after you click the button, and only contacts <code>localhost:11434</code>.</p>
+        <button type="button" id="btn-ollama">Check for Ollama</button>
+        <div class="small" id="ollama-status" aria-live="polite"></div>
+      </details>
+    </section>
+
     <div class="choices">
       <section class="choice" id="choice-live">
         <h3>Run the AI on my device</h3>

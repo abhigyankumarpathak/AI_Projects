@@ -1,7 +1,15 @@
 import { EMBED_MODEL, QUERY_PREFIX, SYSTEM_PROMPT, LLM_MODEL_LABEL, buildPrompt, cosineScores, project as pcaProject } from "./shared.js";
 
+/* The language-model options ("backends"):
+ *   webllm - Llama 3.2 3B downloaded from Hugging Face and run on the GPU with WebLLM
+ *   chrome - the browser's own built-in model (e.g. Gemini Nano in Chrome), if already installed
+ *   ollama - the Ollama app on the visitor's computer, only contacted after they click
+ * The 34 MB search model (transformers.js) is needed for all of them, and is cached after first use.
+ */
 const LLM_F16 = { id: "Llama-3.2-3B-Instruct-q4f16_1-MLC", size: "1.8 GB", memory: "2.5 GB" };
 const LLM_F32 = { id: "Llama-3.2-3B-Instruct-q4f32_1-MLC", size: "1.8 GB", memory: "3 GB" }; // for GPUs without 16-bit float support
+const OLLAMA_BASES = ["http://localhost:11434", "http://127.0.0.1:11434"];
+const CHROME_AI_OPTIONS = { expectedInputs: [{ type: "text", languages: ["en"] }], expectedOutputs: [{ type: "text", languages: ["en"] }] };
 const MODE_KEY = "ragscope-mode";
 const TOP_K = 4;
 const PALETTE = ["#4f46e5", "#d9622b", "#0f9d76", "#c2367a", "#2b7bd9", "#b58b00", "#7a4fd1", "#5f7a2b"];
@@ -10,14 +18,17 @@ const W = 400, H = 300, PAD = 20;
 
 const $ = (id) => document.getElementById(id);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const withTimeout = (promise, ms, fallback) => Promise.race([promise, sleep(ms).then(() => fallback)]);
 
 let kb, demo, toSvg;
-let mode = null;            // "live" | "demo"
+let mode = null;            // "demo" | "webllm" | "chrome" | "ollama"
+let ollama = null;          // { base, model } when mode === "ollama"
 let gpu = { ok: false, f16: false, reason: "" };
 let llmChoice = LLM_F16;
-let extractor = null;       // transformers.js embedding pipeline (live mode)
-let engine = null;          // WebLLM engine (live mode)
-let llmReady = null;        // promise that resolves when the language model is loaded
+let found = { searchModel: false, webllm: false, chrome: false };
+let extractor = null;       // transformers.js embedding pipeline
+let engine = null;          // WebLLM engine
+let llmReady = null;        // resolves when the chosen language model is ready
 let busy = false;
 let currentTop = [];
 let queryPoint = null;
@@ -56,7 +67,13 @@ function setInputs({ typing, examples }) {
   document.querySelectorAll("#examples button").forEach((b) => (b.disabled = !examples));
 }
 
-/* ---------- drawing (same visuals as the Python version) ---------- */
+function llmLabel() {
+  if (mode === "chrome") return "your browser's built-in AI";
+  if (mode === "ollama") return `${ollama.model} (Ollama)`;
+  return LLM_MODEL_LABEL;
+}
+
+/* ---------- drawing ---------- */
 
 function setupMap() {
   const xs = kb.chunks.map((c) => c.x), ys = kb.chunks.map((c) => c.y);
@@ -174,7 +191,7 @@ function showError(message) {
   setStep("generate", "done");
 }
 
-/* ---------- the four steps, shared by live and demo ---------- */
+/* ---------- the four steps, shared by every mode ---------- */
 
 function resetSteps() {
   ["embed", "retrieve", "prompt", "generate"].forEach((s) => setStep(s, null));
@@ -182,6 +199,7 @@ function resetSteps() {
   $("answer").classList.remove("error");
   renderAnswer("", false);
   $("demo-note").hidden = mode !== "demo";
+  $("llm").textContent = mode === "demo" ? LLM_MODEL_LABEL : llmLabel();
 }
 
 function showEmbed(vector, point, ms) {
@@ -210,51 +228,138 @@ function showPrompt(prompt) {
   setStep("generate", "active");
 }
 
-function showDone(stats) {
-  $("stats").textContent = stats;
-  setStep("generate", "done");
-}
+/* ---------- finding AI that's already on this device ---------- */
 
-/* ---------- demo mode: replay recorded data, downloads nothing ---------- */
-
-async function askDemo(example) {
-  resetSteps();
-  setStep("embed", "active");
-  await sleep(500);
-  showEmbed(example.vector, example.point, null);
-  await sleep(900);
-  showRetrieve(example.scores, example.top_ids);
-  await sleep(900);
-  showPrompt(example.prompt);
-  await sleep(700);
-  const words = example.answer.split(/(\s+)/);
-  let shown = "";
-  for (const w of words) {
-    shown += w;
-    renderAnswer(shown, true);
-    await sleep(w.trim() ? 35 : 0);
-  }
-  renderAnswer(example.answer, false);
-  $("t-gen").textContent = "recorded";
-  showDone(`Recorded from ${example.model}: it read ${example.input_tokens} tokens and wrote ${example.output_tokens} tokens.`);
-}
-
-/* ---------- live mode: real models in the browser ---------- */
-
-async function checkGpu() {
-  if (!("gpu" in navigator)) return { ok: false, f16: false, reason: "This browser doesn't support WebGPU, which is needed to run the AI. Try a recent Chrome, Edge or Safari on a laptop or desktop." };
+/** Has the 34 MB search model been downloaded by this site before? */
+async function searchModelCached() {
   try {
-    // Some browsers never answer this call, so give up after 5 seconds instead of hanging.
-    const adapter = await Promise.race([navigator.gpu.requestAdapter(), sleep(5000).then(() => null)]);
-    if (!adapter) return { ok: false, f16: false, reason: "WebGPU is turned on, but no usable graphics chip was found." };
-    return { ok: true, f16: adapter.features.has("shader-f16"), reason: "" };
+    if (!(await caches.has("transformers-cache"))) return false;
+    const keys = await (await caches.open("transformers-cache")).keys();
+    return keys.some((r) => r.url.includes("bge-small-en-v1.5") && r.url.endsWith(".onnx"));
   } catch {
-    return { ok: false, f16: false, reason: "WebGPU couldn't start on this device." };
+    return false;
   }
 }
 
-async function startLive() {
-  setLoading("Loading the search model (about 34 MB)…", 0);
+/** Is RAGScope's language model fully in the cache? Same check as WebLLM's hasModelInCache,
+ *  done with the Cache API directly so we don't load the 6.5 MB library just to look. */
+async function webllmCached(modelId) {
+  try {
+    if (!(await caches.has("webllm/model"))) return false;
+    const cache = await caches.open("webllm/model");
+    const base = `https://huggingface.co/mlc-ai/${modelId}/resolve/main/`;
+    const manifest = await cache.match(base + "tensor-cache.json");
+    if (!manifest) return false;
+    const { records } = await manifest.json();
+    const hits = await Promise.all(records.map((r) => cache.match(new URL(r.dataPath, base).href)));
+    return hits.every(Boolean); // every shard present = the download finished
+  } catch {
+    return false;
+  }
+}
+
+/** Does the browser have its own AI model installed and ready (e.g. Gemini Nano in Chrome)? */
+async function chromeAIAvailable() {
+  try {
+    if (!("LanguageModel" in self)) return false;
+    return (await withTimeout(LanguageModel.availability(CHROME_AI_OPTIONS), 3000, "unavailable")) === "available";
+  } catch {
+    return false;
+  }
+}
+
+/** Ask the visitor's own Ollama app which models it has. Only ever called after a click
+ *  (or when they chose Ollama on an earlier visit). */
+async function findOllama() {
+  for (const base of OLLAMA_BASES) {
+    try {
+      const res = await fetch(`${base}/api/tags`, { signal: AbortSignal.timeout(3000) });
+      if (!res.ok) continue;
+      const models = (await res.json()).models.map((m) => m.name).filter((n) => !/embed/i.test(n));
+      return { base, models };
+    } catch {}
+  }
+  return null;
+}
+
+function preferredOllamaModel(models) {
+  const order = [/^llama3\.2:(3b|latest)$/, /^llama3/, /^qwen/, /^gemma/, /^(mistral|phi)/];
+  for (const re of order) {
+    const hit = models.find((m) => re.test(m));
+    if (hit) return hit;
+  }
+  return models[0];
+}
+
+const searchNote = () => (found.searchModel ? "Nothing to download." : "Only the 34 MB search model needs downloading.");
+
+function foundItem(title, detail, buttonText, onClick) {
+  const li = el("li", { class: "found-item" });
+  const text = el("div");
+  text.append(el("b", {}, title), el("span", { class: "small" }, detail));
+  const btn = el("button", { type: "button" }, buttonText);
+  btn.addEventListener("click", onClick);
+  li.append(text, btn);
+  return li;
+}
+
+function renderFound() {
+  const items = [];
+  if (found.webllm) {
+    items.push(foundItem(
+      `${LLM_MODEL_LABEL}, downloaded from RAGScope before`,
+      `Saved in this browser from an earlier visit. ${searchNote()}`,
+      "Use it", () => enterMode("webllm")));
+  }
+  if (found.chrome) {
+    items.push(foundItem(
+      "Your browser's built-in AI",
+      `Your browser already has its own AI model installed. ${searchNote()}`,
+      "Use it", () => enterMode("chrome")));
+  }
+  $("found-list").replaceChildren(...items);
+  $("found-status").textContent = items.length
+    ? "Good news: you can use one of these without the big download."
+    : "No AI models found in this browser yet.";
+}
+
+async function checkOllamaClicked() {
+  const status = $("ollama-status");
+  status.replaceChildren(el("span", {}, "Checking for Ollama on this computer…"));
+  $("btn-ollama").disabled = true;
+  const result = await findOllama();
+  $("btn-ollama").disabled = false;
+
+  if (!result) {
+    status.replaceChildren(
+      el("span", {}, "Couldn't reach Ollama. If it isn't installed, get it from ollama.com. If it's running, it needs permission to talk to this website. On a Mac, run this in Terminal, then quit and reopen Ollama:"),
+      el("pre", {}, `launchctl setenv OLLAMA_ORIGINS "${location.origin}"`),
+      el("span", {}, "On Windows or Linux, set the environment variable OLLAMA_ORIGINS to the same address, then restart Ollama.")
+    );
+    return;
+  }
+  if (!result.models.length) {
+    status.replaceChildren(el("span", {}, "Ollama is running but has no chat models. Run this in a terminal, then check again:"), el("pre", {}, "ollama pull llama3.2"));
+    return;
+  }
+  const select = el("select", { "aria-label": "Ollama model" });
+  for (const m of result.models) select.append(el("option", { value: m }, m));
+  select.value = preferredOllamaModel(result.models);
+  const use = el("button", { type: "button" }, "Use Ollama");
+  use.addEventListener("click", () => {
+    ollama = { base: result.base, model: select.value };
+    enterMode("ollama");
+  });
+  const row = el("div");
+  row.append(select, document.createTextNode(" "), use);
+  status.replaceChildren(el("span", {}, `Found Ollama with ${result.models.length} model(s). Questions go only to the Ollama app on this computer. ${searchNote()}`), row);
+}
+
+/* ---------- loading models ---------- */
+
+async function loadSearchModel() {
+  if (extractor) return;
+  setLoading(found.searchModel ? "Loading the search model from your browser's cache…" : "Downloading the search model (about 34 MB)…", 0);
   const { pipeline, env } = await import("./vendor/transformers.min.js");
   env.allowLocalModels = false;
   env.backends.onnx.wasm.wasmPaths = new URL("./vendor/", import.meta.url).href;
@@ -270,22 +375,97 @@ async function startLive() {
       }
     },
   });
-
-  setLoading(`Loading the language model (about ${llmChoice.size}). This only happens on the first visit.`, 0.05);
-  setInputs({ typing: true, examples: true }); // steps 1-3 already work while the big model downloads
-  const webllm = await import("./vendor/web-llm.js");
-  llmReady = webllm
-    .CreateMLCEngine(llmChoice.id, {
-      initProgressCallback: (r) => setLoading(`Loading the language model… ${Math.round(r.progress * 100)}%`, 0.05 + r.progress * 0.95),
-    })
-    .then((e) => {
-      engine = e;
-      setLoading(null);
-      $("mode-label").textContent = `Live mode: AI running on your device (${LLM_MODEL_LABEL}). Your questions stay on this device.`;
-      return e;
-    });
-  await llmReady;
+  found.searchModel = true;
 }
+
+async function startLive() {
+  await loadSearchModel();
+  setInputs({ typing: true, examples: true }); // steps 1-3 work while the language model gets ready
+
+  if (mode === "webllm") {
+    setLoading(found.webllm ? "Loading the language model from your browser's cache…" : `Downloading the language model (about ${llmChoice.size}). This only happens once.`, 0.05);
+    const webllm = await import("./vendor/web-llm.js");
+    llmReady = webllm.CreateMLCEngine(llmChoice.id, {
+      initProgressCallback: (r) => setLoading(`Loading the language model… ${Math.round(r.progress * 100)}%`, 0.05 + r.progress * 0.95),
+    }).then((e) => { engine = e; found.webllm = true; });
+  } else {
+    llmReady = Promise.resolve(); // built-in AI and Ollama are already installed
+  }
+  await llmReady;
+  setLoading(null);
+  const where = mode === "ollama" ? "the Ollama app on this computer" : "your device";
+  $("mode-label").textContent = `Live mode: answers by ${llmLabel()}, running on ${where}. Your questions stay on this device.`;
+}
+
+/* ---------- generating answers (one function per backend) ---------- */
+
+async function generateWebLLM(prompt, onText) {
+  const stream = await engine.chat.completions.create({
+    messages: [{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: prompt }],
+    temperature: 0.2,
+    max_tokens: 400,
+    stream: true,
+    stream_options: { include_usage: true },
+  });
+  let usage = null;
+  for await (const chunk of stream) {
+    const text = chunk.choices[0]?.delta?.content;
+    if (text) onText(text);
+    if (chunk.usage) usage = { input: chunk.usage.prompt_tokens, output: chunk.usage.completion_tokens };
+  }
+  return usage;
+}
+
+async function generateChrome(prompt, onText) {
+  const session = await LanguageModel.create({
+    ...CHROME_AI_OPTIONS,
+    initialPrompts: [{ role: "system", content: SYSTEM_PROMPT }],
+  });
+  try {
+    let soFar = "";
+    for await (const chunk of session.promptStreaming(prompt)) {
+      // Older Chrome versions sent the whole text so far; newer ones send only the new part.
+      const piece = chunk.startsWith(soFar) && soFar ? chunk.slice(soFar.length) : chunk;
+      soFar += piece;
+      if (piece) onText(piece);
+    }
+  } finally {
+    session.destroy();
+  }
+  return null;
+}
+
+async function generateOllama(prompt, onText) {
+  const res = await fetch(`${ollama.base}/api/chat`, {
+    method: "POST",
+    body: JSON.stringify({
+      model: ollama.model,
+      stream: true,
+      options: { temperature: 0.2, num_predict: 400 },
+      messages: [{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: prompt }],
+    }),
+  });
+  if (!res.ok) throw new Error(`Ollama replied with error ${res.status}`);
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "", usage = null;
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop();
+    for (const line of lines.filter(Boolean)) {
+      const msg = JSON.parse(line);
+      if (msg.error) throw new Error(msg.error);
+      if (msg.message?.content) onText(msg.message.content);
+      if (msg.done) usage = { input: msg.prompt_eval_count, output: msg.eval_count };
+    }
+  }
+  return usage;
+}
+
+/* ---------- asking ---------- */
 
 async function askLive(question) {
   resetSteps();
@@ -302,42 +482,66 @@ async function askLive(question) {
   const prompt = buildPrompt(question, topIds.map((i) => kb.chunks[i]));
   showPrompt(prompt);
 
-  if (!engine) $("answer").textContent = "Waiting for the language model to finish downloading…";
+  if (mode === "webllm" && !engine) $("answer").textContent = "Waiting for the language model to finish loading…";
   await llmReady;
   const t1 = performance.now();
-  let firstMs = null, answer = "", usage = null;
-  const stream = await engine.chat.completions.create({
-    messages: [{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: prompt }],
-    temperature: 0.2,
-    max_tokens: 400,
-    stream: true,
-    stream_options: { include_usage: true },
-  });
-  for await (const chunk of stream) {
-    const text = chunk.choices[0]?.delta?.content || "";
-    if (text) {
-      firstMs ??= Math.round(performance.now() - t1);
-      answer += text;
-      renderAnswer(answer, true);
-    }
-    if (chunk.usage) usage = chunk.usage;
-  }
+  let firstMs = null, answer = "";
+  const onText = (text) => {
+    firstMs ??= Math.round(performance.now() - t1);
+    answer += text;
+    renderAnswer(answer, true);
+  };
+  const generate = { webllm: generateWebLLM, chrome: generateChrome, ollama: generateOllama }[mode];
+  const usage = await generate(prompt, onText);
   renderAnswer(answer, false);
   $("t-gen").textContent = `first token after ${firstMs} ms`;
   const secs = ((performance.now() - t1) / 1000).toFixed(1);
-  showDone(usage
-    ? `${LLM_MODEL_LABEL} read ${usage.prompt_tokens} tokens and wrote ${usage.completion_tokens} tokens in ${secs} s, on your device.`
-    : `Finished in ${secs} s, on your device.`);
+  $("stats").textContent = usage
+    ? `${llmLabel()} read ${usage.input} tokens and wrote ${usage.output} tokens in ${secs} s, on your device.`
+    : `${llmLabel()} answered in ${secs} s, on your device.`;
+  setStep("generate", "done");
+}
+
+async function askDemo(example) {
+  resetSteps();
+  setStep("embed", "active");
+  await sleep(500);
+  showEmbed(example.vector, example.point, null);
+  await sleep(900);
+  showRetrieve(example.scores, example.top_ids);
+  await sleep(900);
+  showPrompt(example.prompt);
+  await sleep(700);
+  let shown = "";
+  for (const w of example.answer.split(/(\s+)/)) {
+    shown += w;
+    renderAnswer(shown, true);
+    await sleep(w.trim() ? 35 : 0);
+  }
+  renderAnswer(example.answer, false);
+  $("t-gen").textContent = "recorded";
+  $("stats").textContent = `Recorded from ${example.model}: it read ${example.input_tokens} tokens and wrote ${example.output_tokens} tokens.`;
+  setStep("generate", "done");
 }
 
 /* ---------- choosing a mode ---------- */
 
+function saveMode() {
+  store.set(mode === "ollama" ? `ollama|${ollama.base}|${ollama.model}` : mode);
+}
+
+async function stopLive() {
+  try { await engine?.unload(); } catch {}
+  engine = null; llmReady = null;
+}
+
 async function enterMode(next) {
+  await stopLive();
   mode = next;
-  store.set(next);
+  saveMode();
   $("consent").close();
   $("modebar").hidden = false;
-  $("btn-delete").hidden = next !== "live";
+  $("btn-delete").hidden = next === "demo";
   resetSteps();
   if (next === "demo") {
     $("mode-label").textContent = "Demo mode: recorded answers, nothing downloaded. Pick an example question.";
@@ -345,7 +549,7 @@ async function enterMode(next) {
     setInputs({ typing: false, examples: true });
     return;
   }
-  $("mode-label").textContent = "Live mode: downloading models…";
+  $("mode-label").textContent = "Live mode: getting the AI ready…";
   $("q").placeholder = "e.g. Why do AI models make things up?";
   setInputs({ typing: false, examples: false });
   try {
@@ -353,8 +557,8 @@ async function enterMode(next) {
   } catch (err) {
     console.error(err);
     setLoading(null);
-    $("mode-label").textContent = "Live mode couldn't start on this device. Click Change to try the demo.";
-    showError(`The AI couldn't load: ${err.message || err}. Your device may not have enough memory or graphics support.`);
+    $("mode-label").textContent = "The AI couldn't start on this device. Click Change to pick another option or the demo.";
+    showError(`The AI couldn't load: ${err.message || err}`);
     setInputs({ typing: false, examples: false });
   }
 }
@@ -362,19 +566,18 @@ async function enterMode(next) {
 function openConsent() {
   $("agree").checked = false;
   $("btn-live").disabled = true;
+  renderFound();
   $("consent").showModal();
 }
 
 async function deleteModels() {
-  if (!confirm("Delete the downloaded AI models from this browser? You'll need to download them again to use live mode.")) return;
-  try { await engine?.unload(); } catch {}
-  engine = null; extractor = null; llmReady = null;
-  try {
-    for (const name of await caches.keys()) await caches.delete(name);
-  } catch {}
-  try {
-    for (const db of (await indexedDB.databases?.()) || []) if (db.name) indexedDB.deleteDatabase(db.name);
-  } catch {}
+  if (!confirm("Delete the AI models this site saved in your browser? (This doesn't touch Ollama or your browser's built-in AI.)")) return;
+  await stopLive();
+  extractor = null;
+  try { for (const name of await caches.keys()) await caches.delete(name); } catch {}
+  try { for (const db of (await indexedDB.databases?.()) || []) if (db.name) indexedDB.deleteDatabase(db.name); } catch {}
+  found.searchModel = false;
+  found.webllm = false;
   store.set(null);
   mode = null;
   setInputs({ typing: false, examples: false });
@@ -383,20 +586,31 @@ async function deleteModels() {
   openConsent();
 }
 
+/** On a return visit, go straight back to the visitor's last choice, but only if it
+ *  needs no new download. Otherwise ask again. */
+async function resumeSavedChoice() {
+  const saved = store.get() || "";
+  if (saved === "demo") return enterMode("demo"), true;
+  if ((saved === "webllm" || saved === "live") && gpu.ok && found.webllm && found.searchModel) return enterMode("webllm"), true;
+  if (saved === "chrome" && found.chrome && found.searchModel) return enterMode("chrome"), true;
+  if (saved.startsWith("ollama|") && found.searchModel) {
+    const [, base, model] = saved.split("|");
+    const result = await findOllama(); // they allowed this on an earlier visit
+    if (result?.base === base && result.models.includes(model)) {
+      ollama = { base, model };
+      return enterMode("ollama"), true;
+    }
+  }
+  return false;
+}
+
 /* ---------- wiring ---------- */
 
 $("agree").addEventListener("change", () => ($("btn-live").disabled = !($("agree").checked && gpu.ok)));
-$("btn-live").addEventListener("click", () => enterMode("live"));
+$("btn-live").addEventListener("click", () => enterMode("webllm"));
 $("btn-demo").addEventListener("click", () => enterMode("demo"));
-$("btn-change").addEventListener("click", () => {
-  if (busy) return;
-  if (mode === "live" && engine) {
-    // Free the graphics memory. Downloaded files stay cached until "Delete downloaded models".
-    engine.unload().catch(() => {});
-    engine = null; llmReady = null; extractor = null;
-  }
-  openConsent();
-});
+$("btn-ollama").addEventListener("click", checkOllamaClicked);
+$("btn-change").addEventListener("click", () => { if (!busy) openConsent(); });
 $("btn-delete").addEventListener("click", deleteModels);
 $("consent").addEventListener("cancel", (e) => { if (!mode) e.preventDefault(); }); // must choose before continuing
 
@@ -406,7 +620,6 @@ $("answer").addEventListener("mouseout", (e) => e.target.classList.contains("cit
 async function run(question) {
   if (busy || !mode) return;
   busy = true;
-  const typing = !$("q").disabled;
   setInputs({ typing: false, examples: false });
   try {
     if (mode === "demo") {
@@ -420,7 +633,7 @@ async function run(question) {
     showError(`Something went wrong: ${err.message || err}`);
   } finally {
     busy = false;
-    setInputs({ typing: mode === "live" && typing, examples: true });
+    setInputs({ typing: mode !== "demo" && !!extractor, examples: true });
   }
 }
 
@@ -429,6 +642,18 @@ $("ask").addEventListener("submit", (e) => {
   const q = $("q").value.trim();
   if (q.length >= 2) run(q);
 });
+
+async function checkGpu() {
+  if (!("gpu" in navigator)) return { ok: false, f16: false, reason: "This browser doesn't support WebGPU, which this download option needs. You can still use an AI that's already on your device, or the demo." };
+  try {
+    // Some browsers never answer this call, so give up after 5 seconds instead of hanging.
+    const adapter = await withTimeout(navigator.gpu.requestAdapter(), 5000, null);
+    if (!adapter) return { ok: false, f16: false, reason: "WebGPU is turned on, but no usable graphics chip was found." };
+    return { ok: true, f16: adapter.features.has("shader-f16"), reason: "" };
+  } catch {
+    return { ok: false, f16: false, reason: "WebGPU couldn't start on this device." };
+  }
+}
 
 async function init() {
   [kb, demo] = await Promise.all([
@@ -450,8 +675,11 @@ async function init() {
   );
   setInputs({ typing: false, examples: false });
 
+  // Silent checks: they only read this browser's own storage and capabilities. No network.
   gpu = await checkGpu();
   llmChoice = gpu.f16 ? LLM_F16 : LLM_F32;
+  [found.searchModel, found.webllm, found.chrome] = await Promise.all([searchModelCached(), webllmCached(llmChoice.id), chromeAIAvailable()]);
+
   $("dl-size").textContent = llmChoice.size;
   $("dl-llm").textContent = llmChoice.size;
   $("dl-mem").textContent = llmChoice.memory;
@@ -463,21 +691,7 @@ async function init() {
     $("agree").disabled = true;
   }
 
-  // Returning visitors skip the question only if nothing new needs downloading.
-  // If the browser cleared its cache, we ask again rather than silently re-download.
-  const saved = store.get();
-  if (saved === "live" && gpu.ok && (await modelIsCached())) enterMode("live");
-  else if (saved === "demo") enterMode("demo");
-  else openConsent();
-}
-
-async function modelIsCached() {
-  try {
-    const { hasModelInCache } = await import("./vendor/web-llm.js"); // our own copy, no model download
-    return await hasModelInCache(llmChoice.id);
-  } catch {
-    return false;
-  }
+  if (!(await resumeSavedChoice())) openConsent();
 }
 
 init().catch((err) => {
