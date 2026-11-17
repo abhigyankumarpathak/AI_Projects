@@ -40,7 +40,11 @@ def test_cosine_similarity_and_pca():
 def test_api_pipeline_without_api_key(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    from app import llm
     from app.main import create_app
+
+    monkeypatch.setattr(llm, "OLLAMA_URL", "http://127.0.0.1:9")  # nothing listens here
 
     with TestClient(create_app(embedder=FakeEmbedder())) as client:
         kb = client.get("/api/knowledge").json()
@@ -53,3 +57,4 @@ def test_api_pipeline_without_api_key(monkeypatch):
         retrieved = [kb["chunks"][i]["text"].lower() for i in events[1]["top_ids"]]
         assert any("attention" in text for text in retrieved)
         assert "[1]" in events[2]["prompt"]
+        assert "Ollama" in events[3]["message"]

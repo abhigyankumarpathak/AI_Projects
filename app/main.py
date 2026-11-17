@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import anthropic
+import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
@@ -45,8 +46,8 @@ def create_app(embedder=None) -> FastAPI:
             "pca_explained": kb.pca.explained,
             "docs": kb.docs,
             "chunks": [c.__dict__ for c in kb.chunks],
-            "llm_model": llm.MODEL,
-            "llm_ready": llm.has_credentials(),
+            "llm_model": llm.model_name(),
+            "llm_provider": llm.provider(),
         }
 
     @app.post("/api/ask")
@@ -70,9 +71,6 @@ def create_app(embedder=None) -> FastAPI:
             prompt = llm.build_prompt(question, sources)
             yield send("prompt", system=llm.SYSTEM_PROMPT, prompt=prompt)
 
-            if not llm.has_credentials():
-                yield send("error", message="No ANTHROPIC_API_KEY set. Add it to .env to see the generation step.")
-                return
             try:
                 t1 = time.perf_counter()
                 first_token_ms = None
@@ -89,6 +87,10 @@ def create_app(embedder=None) -> FastAPI:
                             total_ms=round((time.perf_counter() - t1) * 1000),
                             **event,
                         )
+            except llm.LLMUnavailable as e:
+                yield send("error", message=str(e))
+            except httpx.HTTPError as e:
+                yield send("error", message=f"Ollama request failed: {e}")
             except anthropic.AuthenticationError:
                 yield send("error", message="Your Anthropic API key was rejected. Check .env.")
             except anthropic.RateLimitError:

@@ -60,7 +60,7 @@
 
       <li class="step" id="step-generate">
         <div class="step-head"><span class="num">4</span><h2>Generate the answer</h2><span class="time" id="t-gen"></span></div>
-        <p class="explain">The language model (<b id="llm">Claude</b>) writes its reply one token at a time, so you see it appear in pieces. Numbers like <span class="cite static">1</span> point to the passages it used. Hover over one to highlight that passage.</p>
+        <p class="explain">The language model (<b id="llm">loading…</b>) writes its reply one token at a time, so you see it appear in pieces. Numbers like <span class="cite static">1</span> point to the passages it used. Hover over one to highlight that passage.</p>
         <div class="answer" id="answer" aria-live="polite"></div>
         <p class="stats" id="stats"></p>
       </li>
@@ -68,7 +68,7 @@
   </main>
 
   <footer class="wrap foot">
-    Built by Abhigyan Pathak · Local embeddings with <code>bge-small-en-v1.5</code> · Answers by Claude
+    Built by Abhigyan Pathak · Local embeddings with <code>bge-small-en-v1.5</code> · Answers by Claude or a local Ollama model
   </footer>
 
   <script src="/static/app.js"></script>

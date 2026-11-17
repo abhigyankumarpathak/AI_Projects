@@ -42,7 +42,7 @@ async function loadKnowledge() {
   $("kbinfo").textContent =
     `Knowledge base: ${kb.docs.length} documents split into ${kb.chunks.length} passages. ` +
     `The 2D map keeps about ${pct}% of the variation in the original ${kb.dimensions} dimensions.` +
-    (kb.llm_ready ? "" : " No API key is set, so steps 1 to 3 will work but step 4 is off.");
+    (kb.llm_provider === "ollama" ? " Answers come from a free model running on this computer." : "");
 
   const xs = kb.chunks.map((c) => c.x), ys = kb.chunks.map((c) => c.y);
   const [minX, maxX, minY, maxY] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
